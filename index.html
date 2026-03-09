@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPU Cloud Pricing Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1a1a2e;
+  --surface: #232340;
+  --surface2: #2a2a4a;
+  --border: #3a3a5c;
+  --text: #e0e0e8;
+  --text-muted: #9090a8;
+  --accent: #6c63ff;
+  --accent-hover: #5a52d5;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+header {
+  text-align: center;
+  padding: 2rem 0 1rem;
+}
+
+header h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+header p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  margin-top: 0.3rem;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
+  align-items: flex-start;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 140px;
+}
+
+.control-group label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+select, button {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+select:hover, select:focus, button:hover {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.provider-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  max-width: 500px;
+}
+
+.provider-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.provider-checkboxes input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.provider-toggle-btns {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.provider-toggle-btns button {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--surface);
+}
+
+.chart-wrapper {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  position: relative;
+}
+
+.chart-wrapper canvas {
+  width: 100% !important;
+}
+
+.no-data-msg {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 3rem;
+  font-size: 0.95rem;
+}
+
+.summary-section h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+.summary-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+thead th {
+  background: var(--surface2);
+  padding: 0.65rem 0.85rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--surface2);
+}
+
+.color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+footer {
+  text-align: center;
+  padding: 1.5rem 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+footer a:hover {
+  text-decoration: underline;
+}
+
+.loading {
+  text-align: center;
+  padding: 4rem;
+  color: var(--text-muted);
+}
+
+.error-msg {
+  text-align: center;
+  padding: 2rem;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.2);
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .controls { flex-direction: column; }
+  .control-group { min-width: 100%; }
+  header h1 { font-size: 1.4rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>GPU Cloud Pricing Tracker</h1>
+    <p>Historical pricing data from gpuhunt open source catalogs</p>
+  </header>
+
+  <div id="app">
+    <div class="loading" id="loading">Loading pricing data...</div>
+  </div>
+</div>
+
+<script>
+const PROVIDER_COLORS = [
+  '#6c63ff', '#ff6b6b', '#4ecdc4', '#ffd93d', '#ff8a5c',
+  '#a8e6cf', '#dcedc1', '#f38181', '#aa96da', '#95e1d3',
+  '#c3bef7', '#f9c74f', '#90be6d', '#f94144', '#277da1',
+  '#43aa8b', '#f3722c', '#577590', '#f8961e', '#9b5de5',
+];
+
+let data = null;
+let chart = null;
+
+async function init() {
+  try {
+    const resp = await fetch('data/prices.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    data = await resp.json();
+    render();
+  } catch (err) {
+    document.getElementById('app').innerHTML =
+      `<div class="error-msg">Failed to load data/prices.json: ${err.message}</div>`;
+  }
+}
+
+function render() {
+  const meta = data.metadata;
+  const providerColors = {};
+  meta.providers.forEach((p, i) => {
+    providerColors[p] = PROVIDER_COLORS[i % PROVIDER_COLORS.length];
+  });
+
+  const gpuCounts = new Set();
+  data.snapshots.forEach(s => s.offers.forEach(o => gpuCounts.add(o.gpu_count)));
+  const sortedGpuCounts = [...gpuCounts].sort((a, b) => a - b);
+
+  const gpuTypes = meta.gpu_types || meta.gpu_names || [];
+  const defaultGpu = gpuTypes.includes('H100') ? 'H100' : gpuTypes[0];
+
+  document.getElementById('app').innerHTML = `
+    <div class="controls">
+      <div class="control-group">
+        <label for="gpu-select">GPU Type</label>
+        <select id="gpu-select">
+          ${gpuTypes.map(g => `<option value="${g}"${g === defaultGpu ? ' selected' : ''}>${g}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="control-group" style="flex: 1; min-width: 280px;">
+        <label>Providers</label>
+        <div class="provider-toggle-btns">
+          <button type="button" id="btn-all">All</button>
+          <button type="button" id="btn-none">None</button>
+        </div>
+        <div class="provider-checkboxes" id="provider-checks">
+          ${meta.providers.map(p => `
+            <label>
+              <input type="checkbox" value="${p}" checked>
+              <span class="color-dot" style="background:${providerColors[p]}"></span>${p}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label for="spot-select">Spot / On-Demand</label>
+        <select id="spot-select">
+          <option value="ondemand" selected>On-Demand</option>
+          <option value="spot">Spot</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="metric-select">Price Metric</label>
+        <select id="metric-select">
+          <option value="min_price" selected>Min Price</option>
+          <option value="avg_price">Avg Price</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="gpucount-select">GPU Count</label>
+        <select id="gpucount-select">
+          <option value="all" selected>All</option>
+          ${sortedGpuCounts.map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="chart-wrapper">
+      <canvas id="price-chart"></canvas>
+      <div class="no-data-msg" id="no-data" style="display:none;">No data matching the current filters.</div>
+    </div>
+
+    <div class="summary-section">
+      <h2>Latest Prices</h2>
+      <div class="summary-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Price ($/hr)</th>
+              <th>GPU Count</th>
+              <th>Instance</th>
+              <th>Locations</th>
+              <th>Spot</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="summary-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>
+      <p>Last updated: ${data.last_updated}</p>
+      <p style="margin-top:0.3rem;">
+        Data source:
+        <a href="https://github.com/nebius/gpuhunt" target="_blank" rel="noopener">gpuhunt</a>
+        (open source GPU pricing catalog)
+      </p>
+    </footer>
+  `;
+
+  // Bind events
+  const onChange = () => updateChart(providerColors);
+  document.getElementById('gpu-select').addEventListener('change', onChange);
+  document.getElementById('spot-select').addEventListener('change', onChange);
+  document.getElementById('metric-select').addEventListener('change', onChange);
+  document.getElementById('gpucount-select').addEventListener('change', onChange);
+  document.querySelectorAll('#provider-checks input').forEach(cb => {
+    cb.addEventListener('change', onChange);
+  });
+  document.getElementById('btn-all').addEventListener('click', () => {
+    document.querySelectorAll('#provider-checks input').forEach(cb => cb.checked = true);
+    onChange();
+  });
+  document.getElementById('btn-none').addEventListener('click', () => {
+    document.querySelectorAll('#provider-checks input').forEach(cb => cb.checked = false);
+    onChange();
+  });
+
+  updateChart(providerColors);
+}
+
+function getFilters() {
+  const gpu = document.getElementById('gpu-select').value;
+  const spotMode = document.getElementById('spot-select').value;
+  const metric = document.getElementById('metric-select').value;
+  const gpuCount = document.getElementById('gpucount-select').value;
+  const providers = [...document.querySelectorAll('#provider-checks input:checked')].map(cb => cb.value);
+  return { gpu, spotMode, metric, gpuCount, providers };
+}
+
+function filterOffers(offers, filters) {
+  return offers.filter(o => {
+    if (o.gpu_name !== filters.gpu) return false;
+    if (!filters.providers.includes(o.provider)) return false;
+    if (filters.spotMode === 'spot' && !o.spot) return false;
+    if (filters.spotMode === 'ondemand' && o.spot) return false;
+    if (filters.gpuCount !== 'all' && o.gpu_count !== parseInt(filters.gpuCount)) return false;
+    return true;
+  });
+}
+
+function buildDatasets(filters, providerColors) {
+  // Group by provider (and spot label if "both")
+  const seriesMap = {};
+
+  data.snapshots.forEach(snapshot => {
+    const date = snapshot.date;
+    const matched = filterOffers(snapshot.offers, filters);
+
+    matched.forEach(offer => {
+      let key = offer.provider;
+      let label = offer.provider;
+      if (filters.spotMode === 'both') {
+        const tag = offer.spot ? 'spot' : 'on-demand';
+        key = `${offer.provider}-${tag}`;
+        label = `${offer.provider} (${tag})`;
+      }
+
+      if (!seriesMap[key]) {
+        seriesMap[key] = { label, provider: offer.provider, points: [] };
+      }
+
+      // For a given date+series, pick the best (lowest) price among matching offers
+      const price = offer[filters.metric];
+      if (price == null) return;
+
+      const existing = seriesMap[key].points.find(p => p.x === date);
+      if (existing) {
+        if (price < existing.y) {
+          existing.y = price;
+          existing.meta = offer;
+        }
+      } else {
+        seriesMap[key].points.push({ x: date, y: price, meta: offer });
+      }
+    });
+  });
+
+  return Object.values(seriesMap).map(series => {
+    const color = providerColors[series.provider];
+    const isSpot = series.label.includes('spot');
+    return {
+      label: series.label,
+      data: series.points.sort((a, b) => a.x.localeCompare(b.x)),
+      borderColor: color,
+      backgroundColor: color + '22',
+      borderWidth: 2,
+      borderDash: isSpot ? [5, 3] : [],
+      pointRadius: 2,
+      pointHoverRadius: 5,
+      tension: 0.2,
+      fill: false,
+    };
+  });
+}
+
+function updateChart(providerColors) {
+  const filters = getFilters();
+  const datasets = buildDatasets(filters, providerColors);
+  const canvas = document.getElementById('price-chart');
+  const noData = document.getElementById('no-data');
+
+  if (datasets.length === 0 || datasets.every(ds => ds.data.length === 0)) {
+    canvas.style.display = 'none';
+    noData.style.display = 'block';
+    if (chart) { chart.destroy(); chart = null; }
+    updateSummaryTable(filters, providerColors);
+    return;
+  }
+
+  canvas.style.display = 'block';
+  noData.style.display = 'none';
+
+  const metricLabel = filters.metric === 'min_price' ? 'Min Price' : 'Avg Price';
+
+  if (chart) chart.destroy();
+
+  chart = new Chart(canvas, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'nearest',
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            color: '#e0e0e8',
+            usePointStyle: true,
+            pointStyle: 'circle',
+            padding: 16,
+            font: { size: 12 },
+          },
+        },
+        tooltip: {
+          backgroundColor: '#232340ee',
+          titleColor: '#e0e0e8',
+          bodyColor: '#c0c0d0',
+          borderColor: '#3a3a5c',
+          borderWidth: 1,
+          padding: 10,
+          callbacks: {
+            title: (items) => items[0]?.raw?.x || '',
+            label: (ctx) => {
+              const m = ctx.raw.meta;
+              if (!m) return `${ctx.dataset.label}: $${ctx.raw.y.toFixed(2)}/hr`;
+              const lines = [
+                `${ctx.dataset.label}: $${ctx.raw.y.toFixed(2)}/hr`,
+                `Instance: ${(m.instance_names || []).join(', ') || '—'}`,
+                `GPU count: ${m.gpu_count}`,
+                `Locations: ${(m.locations || []).slice(0, 4).join(', ')}${(m.locations || []).length > 4 ? '...' : ''}`,
+              ];
+              return lines;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: {
+            unit: 'month',
+            tooltipFormat: 'yyyy-MM-dd',
+            displayFormats: { month: 'MMM yyyy' },
+          },
+          ticks: { color: '#9090a8', maxTicksLimit: 14 },
+          grid: { color: '#2a2a4a' },
+        },
+        y: {
+          title: {
+            display: true,
+            text: `${metricLabel} ($/hr)`,
+            color: '#9090a8',
+          },
+          ticks: {
+            color: '#9090a8',
+            callback: v => '$' + v.toFixed(2),
+          },
+          grid: { color: '#2a2a4a' },
+          beginAtZero: false,
+        },
+      },
+    },
+  });
+
+  // Force a reasonable height
+  canvas.parentElement.style.height = '420px';
+
+  updateSummaryTable(filters, providerColors);
+}
+
+function updateSummaryTable(filters, providerColors) {
+  const tbody = document.getElementById('summary-tbody');
+  if (!tbody) return;
+
+  // Find the latest snapshot with matching data
+  const rows = [];
+  for (let i = data.snapshots.length - 1; i >= 0; i--) {
+    const snapshot = data.snapshots[i];
+    const matched = filterOffers(snapshot.offers, filters);
+    if (matched.length === 0) continue;
+
+    // Group by provider, pick best price per provider
+    const byProvider = {};
+    matched.forEach(o => {
+      const price = o[filters.metric];
+      if (price == null) return;
+      const key = filters.spotMode === 'both'
+        ? `${o.provider}-${o.spot ? 'spot' : 'ondemand'}`
+        : o.provider;
+      if (!byProvider[key] || price < byProvider[key][filters.metric]) {
+        byProvider[key] = o;
+      }
+    });
+
+    Object.values(byProvider).forEach(o => {
+      rows.push({ ...o, date: snapshot.date });
+    });
+    break;
+  }
+
+  rows.sort((a, b) => a[filters.metric] - b[filters.metric]);
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:1.5rem;">No data for current selection.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(o => {
+    const color = providerColors[o.provider];
+    return `<tr>
+      <td><span class="color-dot" style="background:${color}"></span>${o.provider}</td>
+      <td>$${o[filters.metric].toFixed(2)}</td>
+      <td>${o.gpu_count}</td>
+      <td>${(o.instance_names || []).join(', ') || '—'}</td>
+      <td>${(o.locations || []).slice(0, 3).join(', ')}${(o.locations || []).length > 3 ? '...' : ''}</td>
+      <td>${o.spot ? 'Yes' : 'No'}</td>
+      <td>${o.date}</td>
+    </tr>`;
+  }).join('');
+}
+
+init();
+</script>
+
+</body>
+</html>
