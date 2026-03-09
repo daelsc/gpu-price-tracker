@@ -291,7 +291,11 @@ function render() {
   data.snapshots.forEach(s => s.offers.forEach(o => gpuCounts.add(o.gpu_count)));
   const sortedGpuCounts = [...gpuCounts].sort((a, b) => a - b);
 
-  const gpuTypes = meta.gpu_types || meta.gpu_names || [];
+  const allGpuTypes = meta.gpu_types || meta.gpu_names || [];
+  const preferredGpus = ['V100', 'A100', 'H100', 'B200'];
+  const gpuTypes = preferredGpus.filter(g => allGpuTypes.includes(g)).concat(
+    allGpuTypes.filter(g => !preferredGpus.includes(g))
+  );
   const defaultGpu = gpuTypes.includes('H100') ? 'H100' : gpuTypes[0];
 
   document.getElementById('app').innerHTML = `
@@ -299,7 +303,10 @@ function render() {
       <div class="control-group">
         <label for="gpu-select">GPU Type</label>
         <select id="gpu-select">
-          ${gpuTypes.map(g => `<option value="${g}"${g === defaultGpu ? ' selected' : ''}>${g}</option>`).join('')}
+          ${gpuTypes.map((g, i) => {
+            const sep = (i === preferredGpus.filter(pg => allGpuTypes.includes(pg)).length && i > 0) ? '<option disabled>───────────</option>' : '';
+            return sep + `<option value="${g}"${g === defaultGpu ? ' selected' : ''}>${g}</option>`;
+          }).join('')}
         </select>
       </div>
 
