@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect GPU pricing data from gpuhunt's S3 catalogs into a single JSON file."""
+"""Collect GPU pricing data from gpuhunt's S3 catalogs and Epoch AI hardware data."""
 
 import argparse
 import csv
@@ -13,7 +13,50 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+EPOCH_CSV_URL = "https://epoch.ai/data/ml_hardware.csv"
+FSDL_CSV_URL = "https://raw.githubusercontent.com/the-full-stack/website/main/docs/cloud-gpus/cloud-gpus.csv"
 OUTPUT_FILE = os.path.join(DATA_DIR, "prices.json")
+
+# Map FSDL "Cloud" column (lowercased, spaces removed) to gpuhunt provider names
+FSDL_PROVIDER_MAP = {
+    "aws": "aws",
+    "azure": "azure",
+    "gcp": "gcp",
+    "lambda": "lambdalabs",
+    "oraclecloud": "oci",
+    "runpod": "runpod",
+    "cudocompute": "cudo",
+    "datacrunch": "datacrunch",
+}
+
+# Map FSDL "GPU Type" to (gpu_name, gpu_memory) matching gpuhunt naming
+FSDL_GPU_MAP = {
+    "A100 (80 GB)": ("A100", 80.0),
+    "A100 (40 GB)": ("A100", 40.0),
+    "V100 (16 GB)": ("V100", 16.0),
+    "V100 (32 GB)": ("V100", 32.0),
+    "A10G (24 GB)": ("A10G", 24.0),
+    "A10": ("A10", None),
+    "A40 (48 GB)": ("A40", 48.0),
+    "A4000 (16 GB)": ("A4000", 16.0),
+    "A5000 (24 GB)": ("A5000", 24.0),
+    "A6000 (48 GB)": ("A6000", 48.0),
+    "RTX A6000 (48 GB)": ("A6000", 48.0),
+    "H100 (80 GB)": ("H100", 80.0),
+    "H100 HGX (80GB)": ("H100", 80.0),
+    "H100 PCIe (80GB)": ("H100", 80.0),
+    "GH200 (96 GB)": ("GH200", 96.0),
+    "T4 (16 GB)": ("T4", 16.0),
+    "L4 (24 GB)": ("L4", 24.0),
+    "P100 (16 GB)": ("P100", 16.0),
+    "P4 (8 GB)": ("P4", 8.0),
+    "K80 (12 GB)": ("K80", 12.0),
+    "Quadro RTX 6000 (24 GB)": ("RTX6000", 24.0),
+    "RTX4000 (8 GB)": ("RTX4000", 8.0),
+    "RTX5000 (16 GB)": ("RTX5000", 16.0),
+    "3080Ti (12 GB)": ("RTX3080Ti", 12.0),
+}
 
 V1_BASE = "https://dstack-gpu-pricing.s3.eu-west-1.amazonaws.com/v1"
 V2_BASE = "https://dstack-gpu-pricing.s3.eu-west-1.amazonaws.com/v2"
@@ -247,6 +290,162 @@ def build_metadata(snapshots):
     }
 
 
+def fetch_epoch_data():
+    """Fetch Epoch AI ml_hardware.csv and return structured hardware price-performance data."""
+    log("Fetching Epoch AI hardware data...")
+    data = fetch_url(EPOCH_CSV_URL)
+    if data is None:
+        log("ERROR: Could not fetch Epoch AI CSV")
+        return None
+
+    text = data.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(text))
+
+    items = []
+    for row in reader:
+        release_date = row.get("Release date", "").strip()
+        release_price = row.get("Release price (USD)", "").strip()
+        if not release_date or not release_price:
+            continue
+        price_val = parse_float(release_price)
+        if price_val is None or price_val <= 0:
+            continue
+
+        name = row.get("Name", "").strip()
+        max_flops = parse_float(row.get("Max performance (FLOP/s)", ""))
+        price_perf = parse_float(row.get("Price-performance (FLOP/s per $)", ""))
+        tdp = parse_float(row.get("TDP (W)", ""))
+        memory_bytes = parse_float(row.get("Memory (bytes)", ""))
+
+        item = {
+            "name": name,
+            "release_date": release_date,
+            "release_price_usd": price_val,
+        }
+        if max_flops is not None:
+            item["max_flops"] = max_flops
+        if price_perf is not None:
+            item["price_performance"] = price_perf
+            item["dollars_per_flop"] = 1.0 / price_perf
+        if tdp is not None:
+            item["tdp_watts"] = tdp
+        if memory_bytes is not None:
+            item["memory_gb"] = round(memory_bytes / (1024 ** 3), 1)
+
+        items.append(item)
+
+    items.sort(key=lambda x: x["release_date"])
+    log(f"  Epoch AI: {len(items)} hardware entries with price data")
+
+    return {
+        "description": "GPU hardware price-performance from Epoch AI (purchase price, not cloud rental)",
+        "source_url": EPOCH_CSV_URL,
+        "license": "CC-BY",
+        "items": items,
+    }
+
+
+def normalize_fsdl_provider(cloud):
+    """Normalize FSDL Cloud column to a provider name."""
+    key = cloud.strip().lower().replace(" ", "").replace(".", "")
+    return FSDL_PROVIDER_MAP.get(key, key)
+
+
+def normalize_fsdl_gpu(gpu_type):
+    """Map FSDL GPU Type to (gpu_name, gpu_memory). Returns None if unmappable."""
+    gpu_type = gpu_type.strip()
+    if gpu_type in FSDL_GPU_MAP:
+        return FSDL_GPU_MAP[gpu_type]
+    # Fallback: strip parenthetical, use as-is
+    name = gpu_type.split("(")[0].strip().replace(" ", "")
+    return (name, None) if name else None
+
+
+def fetch_fsdl_snapshot():
+    """Fetch FSDL cloud-gpus.csv and aggregate into gpuhunt-compatible offer groups."""
+    log("Fetching FSDL cloud GPU data...")
+    data = fetch_url(FSDL_CSV_URL)
+    if data is None:
+        log("ERROR: Could not fetch FSDL CSV")
+        return None
+
+    text = data.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(text))
+
+    # Key: (provider, gpu_name, gpu_memory, spot, gpu_count)
+    buckets = {}
+
+    for row in reader:
+        cloud = row.get("Cloud", "").strip()
+        gpu_type = row.get("GPU Type", "").strip()
+        if not cloud or not gpu_type:
+            continue
+
+        gpu_info = normalize_fsdl_gpu(gpu_type)
+        if gpu_info is None:
+            continue
+        gpu_name, gpu_memory = gpu_info
+        provider = normalize_fsdl_provider(cloud)
+
+        gpu_count = int(parse_float(row.get("GPUs", "1")) or 1)
+        instance_name = row.get("Name", "").strip()
+
+        # Extract prices: prefer Per-GPU, fall back to On-demand / gpu_count
+        per_gpu = parse_float(row.get("Per-GPU", ""))
+        on_demand = parse_float(row.get("On-demand", ""))
+        spot_price = parse_float(row.get("Spot", ""))
+
+        if per_gpu is not None and per_gpu > 0:
+            od_price = per_gpu
+        elif on_demand is not None and on_demand > 0:
+            od_price = round(on_demand / gpu_count, 4)
+        else:
+            od_price = None
+
+        # Add on-demand offer
+        if od_price is not None and od_price > 0:
+            key = (provider, gpu_name, gpu_memory, False, gpu_count)
+            if key not in buckets:
+                buckets[key] = {"prices": [], "locations": set(), "instance_names": set()}
+            buckets[key]["prices"].append(od_price)
+            if instance_name:
+                buckets[key]["instance_names"].add(instance_name)
+
+        # Add spot offer if spot price available
+        if spot_price is not None and spot_price > 0:
+            spot_per_gpu = round(spot_price / gpu_count, 4)
+            key = (provider, gpu_name, gpu_memory, True, gpu_count)
+            if key not in buckets:
+                buckets[key] = {"prices": [], "locations": set(), "instance_names": set()}
+            buckets[key]["prices"].append(spot_per_gpu)
+            if instance_name:
+                buckets[key]["instance_names"].add(instance_name)
+
+    offers = []
+    for (provider, gpu_name, gpu_memory, spot, gpu_count), b in sorted(buckets.items()):
+        prices = b["prices"]
+        offers.append({
+            "provider": provider,
+            "gpu_name": gpu_name,
+            "gpu_memory": gpu_memory,
+            "spot": spot,
+            "min_price": round(min(prices), 2),
+            "avg_price": round(sum(prices) / len(prices), 2),
+            "locations": sorted(b["locations"]),
+            "instance_names": sorted(b["instance_names"]),
+            "gpu_count": gpu_count,
+            "offer_count": len(prices),
+        })
+
+    log(f"  FSDL: {len(offers)} offer groups")
+
+    return {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "source": "fsdl",
+        "offers": offers,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Collect GPU pricing data from gpuhunt S3 catalogs")
     parser.add_argument("--full", action="store_true", help="Force re-download of all data (v1 + v2)")
@@ -297,6 +496,12 @@ def main():
     # Sort by date
     snapshots.sort(key=lambda s: s["date"])
 
+    # Fetch Epoch AI hardware data
+    epoch_data = fetch_epoch_data()
+
+    # Always refresh FSDL (single HTTP request)
+    fsdl_data = fetch_fsdl_snapshot()
+
     metadata = build_metadata(snapshots)
 
     output = {
@@ -304,6 +509,10 @@ def main():
         "metadata": metadata,
         "snapshots": snapshots,
     }
+    if epoch_data:
+        output["epoch_hardware"] = epoch_data
+    if fsdl_data:
+        output["fsdl"] = fsdl_data
 
     with open(OUTPUT_FILE, "w") as f:
         json.dump(output, f, indent=2)

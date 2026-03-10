@@ -28,28 +28,37 @@ body {
   min-height: 100vh;
 }
 
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1.5rem;
+.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+header { text-align: center; padding: 2rem 0 1rem; }
+header h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.02em; }
+header p { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.3rem; }
+
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1.25rem;
+  border-bottom: 2px solid var(--border);
 }
 
-header {
-  text-align: center;
-  padding: 2rem 0 1rem;
-}
-
-header h1 {
-  font-size: 1.8rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-header p {
+.tab {
+  padding: 0.7rem 1.3rem;
+  font-size: 0.9rem;
+  font-weight: 600;
   color: var(--text-muted);
-  font-size: 0.95rem;
-  margin-top: 0.3rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
 }
+
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
 
 .controls {
   display: flex;
@@ -70,7 +79,7 @@ header p {
   min-width: 140px;
 }
 
-.control-group label {
+.control-group > label {
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -140,9 +149,7 @@ select:hover, select:focus, button:hover {
   position: relative;
 }
 
-.chart-wrapper canvas {
-  width: 100% !important;
-}
+.chart-wrapper canvas { width: 100% !important; }
 
 .no-data-msg {
   text-align: center;
@@ -151,7 +158,7 @@ select:hover, select:focus, button:hover {
   font-size: 0.95rem;
 }
 
-.summary-section h2 {
+.section-title {
   font-size: 1.1rem;
   margin-bottom: 0.75rem;
   font-weight: 600;
@@ -161,7 +168,7 @@ select:hover, select:focus, button:hover {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  overflow: hidden;
+  overflow-x: auto;
   margin-bottom: 1.25rem;
 }
 
@@ -181,6 +188,7 @@ thead th {
   letter-spacing: 0.04em;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 tbody td {
@@ -188,13 +196,8 @@ tbody td {
   border-bottom: 1px solid var(--border);
 }
 
-tbody tr:last-child td {
-  border-bottom: none;
-}
-
-tbody tr:hover {
-  background: var(--surface2);
-}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--surface2); }
 
 .color-dot {
   display: inline-block;
@@ -205,6 +208,19 @@ tbody tr:hover {
   vertical-align: middle;
 }
 
+.source-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.source-badge.gpuhunt { background: #6c63ff33; color: #6c63ff; }
+.source-badge.fsdl { background: #4ecdc433; color: #4ecdc4; }
+
 footer {
   text-align: center;
   padding: 1.5rem 0;
@@ -213,20 +229,10 @@ footer {
   border-top: 1px solid var(--border);
 }
 
-footer a {
-  color: var(--accent);
-  text-decoration: none;
-}
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
 
-footer a:hover {
-  text-decoration: underline;
-}
-
-.loading {
-  text-align: center;
-  padding: 4rem;
-  color: var(--text-muted);
-}
+.loading { text-align: center; padding: 4rem; color: var(--text-muted); }
 
 .error-msg {
   text-align: center;
@@ -237,10 +243,21 @@ footer a:hover {
   border-radius: 10px;
 }
 
+.data-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
 @media (max-width: 768px) {
   .controls { flex-direction: column; }
   .control-group { min-width: 100%; }
   header h1 { font-size: 1.4rem; }
+  .tabs { overflow-x: auto; }
 }
 </style>
 </head>
@@ -249,11 +266,11 @@ footer a:hover {
 <div class="container">
   <header>
     <h1>GPU Cloud Pricing Tracker</h1>
-    <p>Historical pricing data from gpuhunt open source catalogs</p>
+    <p>Historical and current GPU pricing from multiple open source datasets</p>
   </header>
 
   <div id="app">
-    <div class="loading" id="loading">Loading pricing data...</div>
+    <div class="loading">Loading pricing data...</div>
   </div>
 </div>
 
@@ -266,7 +283,8 @@ const PROVIDER_COLORS = [
 ];
 
 let data = null;
-let chart = null;
+let gpuhuntChart = null;
+let epochChart = null;
 
 async function init() {
   try {
@@ -282,139 +300,275 @@ async function init() {
 
 function render() {
   const meta = data.metadata;
+
+  // Build combined provider list from gpuhunt + fsdl
+  const allProviders = new Set(meta.providers);
+  if (data.fsdl) {
+    data.fsdl.offers.forEach(o => allProviders.add(o.provider));
+  }
+  const providerList = [...allProviders].sort();
   const providerColors = {};
-  meta.providers.forEach((p, i) => {
+  providerList.forEach((p, i) => {
     providerColors[p] = PROVIDER_COLORS[i % PROVIDER_COLORS.length];
   });
 
-  const gpuCounts = new Set();
-  data.snapshots.forEach(s => s.offers.forEach(o => gpuCounts.add(o.gpu_count)));
-  const sortedGpuCounts = [...gpuCounts].sort((a, b) => a - b);
-
-  const allGpuTypes = meta.gpu_types || meta.gpu_names || [];
+  // GPU types: prefer V100/A100/H100/B200
+  const allGpuSet = new Set(meta.gpu_types || []);
+  if (data.fsdl) {
+    data.fsdl.offers.forEach(o => allGpuSet.add(o.gpu_name));
+  }
+  const allGpuTypes = [...allGpuSet].sort();
   const preferredGpus = ['V100', 'A100', 'H100', 'B200'];
   const gpuTypes = preferredGpus.filter(g => allGpuTypes.includes(g)).concat(
     allGpuTypes.filter(g => !preferredGpus.includes(g))
   );
   const defaultGpu = gpuTypes.includes('H100') ? 'H100' : gpuTypes[0];
 
+  // GPU counts
+  const gpuCounts = new Set();
+  data.snapshots.forEach(s => s.offers.forEach(o => gpuCounts.add(o.gpu_count)));
+  if (data.fsdl) data.fsdl.offers.forEach(o => gpuCounts.add(o.gpu_count));
+  const sortedGpuCounts = [...gpuCounts].sort((a, b) => a - b);
+
+  const gpuOptionsSep = preferredGpus.filter(pg => allGpuTypes.includes(pg)).length;
+  const gpuOptionsHtml = gpuTypes.map((g, i) => {
+    const sep = (i === gpuOptionsSep && i > 0) ? '<option disabled>───────────</option>' : '';
+    return sep + `<option value="${g}"${g === defaultGpu ? ' selected' : ''}>${g}</option>`;
+  }).join('');
+
+  const providerChecksHtml = providerList.map(p => `
+    <label>
+      <input type="checkbox" value="${p}" checked>
+      <span class="color-dot" style="background:${providerColors[p]}"></span>${p}
+    </label>
+  `).join('');
+
+  const hasFsdl = data.fsdl && data.fsdl.offers.length > 0;
+  const hasEpoch = data.epoch_hardware && data.epoch_hardware.items.length > 0;
+
   document.getElementById('app').innerHTML = `
-    <div class="controls">
-      <div class="control-group">
-        <label for="gpu-select">GPU Type</label>
-        <select id="gpu-select">
-          ${gpuTypes.map((g, i) => {
-            const sep = (i === preferredGpus.filter(pg => allGpuTypes.includes(pg)).length && i > 0) ? '<option disabled>───────────</option>' : '';
-            return sep + `<option value="${g}"${g === defaultGpu ? ' selected' : ''}>${g}</option>`;
-          }).join('')}
-        </select>
-      </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="gpuhunt">Cloud Rental History</button>
+      ${hasFsdl ? '<button class="tab" data-tab="comparison">Current Price Comparison</button>' : ''}
+      ${hasEpoch ? '<button class="tab" data-tab="epoch">Hardware $/FLOP Trends</button>' : ''}
+    </div>
 
-      <div class="control-group" style="flex: 1; min-width: 280px;">
-        <label>Providers</label>
-        <div class="provider-toggle-btns">
-          <button type="button" id="btn-all">All</button>
-          <button type="button" id="btn-none">None</button>
+    <!-- Tab 1: gpuhunt time series -->
+    <div class="tab-panel active" id="panel-gpuhunt">
+      <div class="controls" id="controls-gpuhunt">
+        <div class="control-group">
+          <label for="gpu-select">GPU Type</label>
+          <select id="gpu-select">${gpuOptionsHtml}</select>
         </div>
-        <div class="provider-checkboxes" id="provider-checks">
-          ${meta.providers.map(p => `
-            <label>
-              <input type="checkbox" value="${p}" checked>
-              <span class="color-dot" style="background:${providerColors[p]}"></span>${p}
-            </label>
-          `).join('')}
+        <div class="control-group" style="flex: 1; min-width: 280px;">
+          <label>Providers</label>
+          <div class="provider-toggle-btns">
+            <button type="button" id="btn-all">All</button>
+            <button type="button" id="btn-none">None</button>
+          </div>
+          <div class="provider-checkboxes" id="provider-checks">${providerChecksHtml}</div>
+        </div>
+        <div class="control-group">
+          <label for="spot-select">Spot / On-Demand</label>
+          <select id="spot-select">
+            <option value="ondemand" selected>On-Demand</option>
+            <option value="spot">Spot</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="metric-select">Price Metric</label>
+          <select id="metric-select">
+            <option value="min_price" selected>Min Price</option>
+            <option value="avg_price">Avg Price</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="gpucount-select">GPU Count</label>
+          <select id="gpucount-select">
+            <option value="all" selected>All</option>
+            ${sortedGpuCounts.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
         </div>
       </div>
 
-      <div class="control-group">
-        <label for="spot-select">Spot / On-Demand</label>
-        <select id="spot-select">
-          <option value="ondemand" selected>On-Demand</option>
-          <option value="spot">Spot</option>
-          <option value="both">Both</option>
-        </select>
+      <div class="chart-wrapper" style="height:420px;">
+        <canvas id="price-chart"></canvas>
+        <div class="no-data-msg" id="no-data" style="display:none;">No data matching the current filters.</div>
       </div>
 
-      <div class="control-group">
-        <label for="metric-select">Price Metric</label>
-        <select id="metric-select">
-          <option value="min_price" selected>Min Price</option>
-          <option value="avg_price">Avg Price</option>
-        </select>
-      </div>
-
-      <div class="control-group">
-        <label for="gpucount-select">GPU Count</label>
-        <select id="gpucount-select">
-          <option value="all" selected>All</option>
-          ${sortedGpuCounts.map(c => `<option value="${c}">${c}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-
-    <div class="chart-wrapper">
-      <canvas id="price-chart"></canvas>
-      <div class="no-data-msg" id="no-data" style="display:none;">No data matching the current filters.</div>
-    </div>
-
-    <div class="summary-section">
-      <h2>Latest Prices</h2>
-      <div class="summary-table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Provider</th>
-              <th>Price ($/hr)</th>
-              <th>GPU Count</th>
-              <th>Instance</th>
-              <th>Locations</th>
-              <th>Spot</th>
-              <th>Date</th>
-            </tr>
-          </thead>
-          <tbody id="summary-tbody"></tbody>
-        </table>
+      <div>
+        <h2 class="section-title">Latest Prices</h2>
+        <div class="summary-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Price ($/hr)</th>
+                <th>GPU Count</th>
+                <th>Instance</th>
+                <th>Locations</th>
+                <th>Spot</th>
+                <th>Source</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="summary-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
+
+    <!-- Tab 2: FSDL current comparison -->
+    ${hasFsdl ? `
+    <div class="tab-panel" id="panel-comparison">
+      <div class="data-note">
+        Current snapshot from <a href="https://fullstackdeeplearning.com/cloud-gpus/" target="_blank">Full Stack Deep Learning</a>
+        covering ${new Set(data.fsdl.offers.map(o => o.provider)).size} providers.
+        Prices as of ${data.fsdl.date}.
+      </div>
+      <div class="controls" id="controls-fsdl">
+        <div class="control-group">
+          <label for="fsdl-gpu-select">GPU Type</label>
+          <select id="fsdl-gpu-select">${gpuOptionsHtml}</select>
+        </div>
+        <div class="control-group">
+          <label for="fsdl-spot-select">Spot / On-Demand</label>
+          <select id="fsdl-spot-select">
+            <option value="ondemand" selected>On-Demand</option>
+            <option value="spot">Spot</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="fsdl-gpucount-select">GPU Count</label>
+          <select id="fsdl-gpucount-select">
+            <option value="all" selected>All</option>
+            ${sortedGpuCounts.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="chart-wrapper" style="height:420px;">
+        <canvas id="fsdl-chart"></canvas>
+        <div class="no-data-msg" id="fsdl-no-data" style="display:none;">No data matching the current filters.</div>
+      </div>
+      <div>
+        <h2 class="section-title">All Offers</h2>
+        <div class="summary-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>$/hr per GPU</th>
+                <th>GPU Count</th>
+                <th>Instance</th>
+                <th>Spot</th>
+              </tr>
+            </thead>
+            <tbody id="fsdl-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Tab 3: Epoch hardware -->
+    ${hasEpoch ? `
+    <div class="tab-panel" id="panel-epoch">
+      <div class="data-note">
+        Hardware purchase price-performance data from
+        <a href="https://epoch.ai" target="_blank">Epoch AI</a> (CC-BY license).
+        This tracks GPU purchase prices, not cloud rental rates. ${data.epoch_hardware.items.length} GPUs with price data.
+      </div>
+      <div class="chart-wrapper" style="height:460px;">
+        <canvas id="epoch-chart"></canvas>
+      </div>
+      <div>
+        <h2 class="section-title">Hardware Price History</h2>
+        <div class="summary-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>GPU</th>
+                <th>Release Date</th>
+                <th>Price (USD)</th>
+                <th>PFLOP/s</th>
+                <th>$/PFLOP/s</th>
+                <th>TDP (W)</th>
+                <th>Memory (GB)</th>
+              </tr>
+            </thead>
+            <tbody id="epoch-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    ` : ''}
 
     <footer>
       <p>Last updated: ${data.last_updated}</p>
       <p style="margin-top:0.3rem;">
-        Data source:
-        <a href="https://github.com/nebius/gpuhunt" target="_blank" rel="noopener">gpuhunt</a>
-        (open source GPU pricing catalog)
+        Data sources:
+        <a href="https://github.com/dstackai/gpuhunt" target="_blank">gpuhunt</a>,
+        <a href="https://fullstackdeeplearning.com/cloud-gpus/" target="_blank">FSDL</a>,
+        <a href="https://epoch.ai/data/ml_hardware.csv" target="_blank">Epoch AI</a>
       </p>
     </footer>
   `;
 
-  // Bind events
-  const onChange = () => updateChart(providerColors);
-  document.getElementById('gpu-select').addEventListener('change', onChange);
-  document.getElementById('spot-select').addEventListener('change', onChange);
-  document.getElementById('metric-select').addEventListener('change', onChange);
-  document.getElementById('gpucount-select').addEventListener('change', onChange);
+  // Tab switching
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  // gpuhunt controls
+  const onGpuhuntChange = () => updateGpuhuntChart(providerColors);
+  ['gpu-select', 'spot-select', 'metric-select', 'gpucount-select'].forEach(id => {
+    document.getElementById(id).addEventListener('change', onGpuhuntChange);
+  });
   document.querySelectorAll('#provider-checks input').forEach(cb => {
-    cb.addEventListener('change', onChange);
+    cb.addEventListener('change', onGpuhuntChange);
   });
   document.getElementById('btn-all').addEventListener('click', () => {
     document.querySelectorAll('#provider-checks input').forEach(cb => cb.checked = true);
-    onChange();
+    onGpuhuntChange();
   });
   document.getElementById('btn-none').addEventListener('click', () => {
     document.querySelectorAll('#provider-checks input').forEach(cb => cb.checked = false);
-    onChange();
+    onGpuhuntChange();
   });
 
-  updateChart(providerColors);
+  updateGpuhuntChart(providerColors);
+
+  // FSDL controls
+  if (hasFsdl) {
+    const onFsdlChange = () => updateFsdlView(providerColors);
+    ['fsdl-gpu-select', 'fsdl-spot-select', 'fsdl-gpucount-select'].forEach(id => {
+      document.getElementById(id).addEventListener('change', onFsdlChange);
+    });
+    updateFsdlView(providerColors);
+  }
+
+  // Epoch
+  if (hasEpoch) {
+    renderEpoch();
+  }
 }
 
-function getFilters() {
-  const gpu = document.getElementById('gpu-select').value;
-  const spotMode = document.getElementById('spot-select').value;
-  const metric = document.getElementById('metric-select').value;
-  const gpuCount = document.getElementById('gpucount-select').value;
-  const providers = [...document.querySelectorAll('#provider-checks input:checked')].map(cb => cb.value);
-  return { gpu, spotMode, metric, gpuCount, providers };
+// ─── gpuhunt time series ───
+
+function getGpuhuntFilters() {
+  return {
+    gpu: document.getElementById('gpu-select').value,
+    spotMode: document.getElementById('spot-select').value,
+    metric: document.getElementById('metric-select').value,
+    gpuCount: document.getElementById('gpucount-select').value,
+    providers: [...document.querySelectorAll('#provider-checks input:checked')].map(cb => cb.value),
+  };
 }
 
 function filterOffers(offers, filters) {
@@ -428,15 +582,11 @@ function filterOffers(offers, filters) {
   });
 }
 
-function buildDatasets(filters, providerColors) {
-  // Group by provider (and spot label if "both")
+function buildGpuhuntDatasets(filters, providerColors) {
   const seriesMap = {};
-
   data.snapshots.forEach(snapshot => {
     const date = snapshot.date;
-    const matched = filterOffers(snapshot.offers, filters);
-
-    matched.forEach(offer => {
+    filterOffers(snapshot.offers, filters).forEach(offer => {
       let key = offer.provider;
       let label = offer.provider;
       if (filters.spotMode === 'both') {
@@ -444,21 +594,12 @@ function buildDatasets(filters, providerColors) {
         key = `${offer.provider}-${tag}`;
         label = `${offer.provider} (${tag})`;
       }
-
-      if (!seriesMap[key]) {
-        seriesMap[key] = { label, provider: offer.provider, points: [] };
-      }
-
-      // For a given date+series, pick the best (lowest) price among matching offers
+      if (!seriesMap[key]) seriesMap[key] = { label, provider: offer.provider, points: [] };
       const price = offer[filters.metric];
       if (price == null) return;
-
       const existing = seriesMap[key].points.find(p => p.x === date);
       if (existing) {
-        if (price < existing.y) {
-          existing.y = price;
-          existing.meta = offer;
-        }
+        if (price < existing.y) { existing.y = price; existing.meta = offer; }
       } else {
         seriesMap[key].points.push({ x: date, y: price, meta: offer });
       }
@@ -483,66 +624,299 @@ function buildDatasets(filters, providerColors) {
   });
 }
 
-function updateChart(providerColors) {
-  const filters = getFilters();
-  const datasets = buildDatasets(filters, providerColors);
+function updateGpuhuntChart(providerColors) {
+  const filters = getGpuhuntFilters();
+  const datasets = buildGpuhuntDatasets(filters, providerColors);
   const canvas = document.getElementById('price-chart');
   const noData = document.getElementById('no-data');
 
   if (datasets.length === 0 || datasets.every(ds => ds.data.length === 0)) {
     canvas.style.display = 'none';
     noData.style.display = 'block';
-    if (chart) { chart.destroy(); chart = null; }
-    updateSummaryTable(filters, providerColors);
+    if (gpuhuntChart) { gpuhuntChart.destroy(); gpuhuntChart = null; }
+    updateGpuhuntTable(filters, providerColors);
+    return;
+  }
+
+  canvas.style.display = 'block';
+  noData.style.display = 'none';
+  const metricLabel = filters.metric === 'min_price' ? 'Min Price' : 'Avg Price';
+
+  if (gpuhuntChart) gpuhuntChart.destroy();
+  gpuhuntChart = new Chart(canvas, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { color: '#e0e0e8', usePointStyle: true, pointStyle: 'circle', padding: 16, font: { size: 12 } },
+        },
+        tooltip: {
+          backgroundColor: '#232340ee', titleColor: '#e0e0e8', bodyColor: '#c0c0d0',
+          borderColor: '#3a3a5c', borderWidth: 1, padding: 10,
+          callbacks: {
+            title: (items) => items[0]?.raw?.x || '',
+            label: (ctx) => {
+              const m = ctx.raw.meta;
+              if (!m) return `${ctx.dataset.label}: $${ctx.raw.y.toFixed(2)}/hr`;
+              return [
+                `${ctx.dataset.label}: $${ctx.raw.y.toFixed(2)}/hr`,
+                `Instance: ${(m.instance_names || []).join(', ') || '\u2014'}`,
+                `GPU count: ${m.gpu_count}`,
+                `Locations: ${(m.locations || []).slice(0, 4).join(', ')}${(m.locations || []).length > 4 ? '...' : ''}`,
+              ];
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'month', tooltipFormat: 'yyyy-MM-dd', displayFormats: { month: 'MMM yyyy' } },
+          ticks: { color: '#9090a8', maxTicksLimit: 14 },
+          grid: { color: '#2a2a4a' },
+        },
+        y: {
+          title: { display: true, text: `${metricLabel} ($/hr)`, color: '#9090a8' },
+          ticks: { color: '#9090a8', callback: v => '$' + v.toFixed(2) },
+          grid: { color: '#2a2a4a' },
+          beginAtZero: false,
+        },
+      },
+    },
+  });
+
+  updateGpuhuntTable(filters, providerColors);
+}
+
+function updateGpuhuntTable(filters, providerColors) {
+  const tbody = document.getElementById('summary-tbody');
+  if (!tbody) return;
+
+  // Gather rows from gpuhunt (latest snapshot) and fsdl
+  const rows = [];
+
+  // gpuhunt latest
+  for (let i = data.snapshots.length - 1; i >= 0; i--) {
+    const snapshot = data.snapshots[i];
+    const matched = filterOffers(snapshot.offers, filters);
+    if (matched.length === 0) continue;
+    const byProvider = {};
+    matched.forEach(o => {
+      const price = o[filters.metric];
+      if (price == null) return;
+      const key = filters.spotMode === 'both' ? `${o.provider}-${o.spot ? 'spot' : 'od'}` : o.provider;
+      if (!byProvider[key] || price < byProvider[key][filters.metric]) byProvider[key] = o;
+    });
+    Object.values(byProvider).forEach(o => rows.push({ ...o, date: snapshot.date, source: 'gpuhunt' }));
+    break;
+  }
+
+  // fsdl offers (if available)
+  if (data.fsdl) {
+    const fsdlMatched = filterOffers(data.fsdl.offers, filters);
+    const byProvider = {};
+    fsdlMatched.forEach(o => {
+      const price = o[filters.metric];
+      if (price == null) return;
+      const key = filters.spotMode === 'both' ? `${o.provider}-${o.spot ? 'spot' : 'od'}` : o.provider;
+      // Only add if not already present from gpuhunt or if cheaper
+      if (!byProvider[key] || price < byProvider[key][filters.metric]) byProvider[key] = o;
+    });
+    Object.values(byProvider).forEach(o => {
+      // Don't duplicate providers already in gpuhunt
+      if (!rows.find(r => r.provider === o.provider && r.spot === o.spot)) {
+        rows.push({ ...o, date: data.fsdl.date, source: 'fsdl' });
+      }
+    });
+  }
+
+  rows.sort((a, b) => a[filters.metric] - b[filters.metric]);
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:1.5rem;">No data for current selection.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(o => {
+    const color = providerColors[o.provider] || '#888';
+    const badge = `<span class="source-badge ${o.source}">${o.source}</span>`;
+    return `<tr>
+      <td><span class="color-dot" style="background:${color}"></span>${o.provider}</td>
+      <td>$${o[filters.metric].toFixed(2)}</td>
+      <td>${o.gpu_count}</td>
+      <td>${(o.instance_names || []).join(', ') || '\u2014'}</td>
+      <td>${(o.locations || []).slice(0, 3).join(', ')}${(o.locations || []).length > 3 ? '...' : ''}</td>
+      <td>${o.spot ? 'Yes' : 'No'}</td>
+      <td>${badge}</td>
+      <td>${o.date}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── FSDL comparison bar chart ───
+
+let fsdlChart = null;
+
+function updateFsdlView(providerColors) {
+  const gpu = document.getElementById('fsdl-gpu-select').value;
+  const spotMode = document.getElementById('fsdl-spot-select').value;
+  const gpuCount = document.getElementById('fsdl-gpucount-select').value;
+
+  const offers = data.fsdl.offers.filter(o => {
+    if (o.gpu_name !== gpu) return false;
+    if (spotMode === 'spot' && !o.spot) return false;
+    if (spotMode === 'ondemand' && o.spot) return false;
+    if (gpuCount !== 'all' && o.gpu_count !== parseInt(gpuCount)) return false;
+    return true;
+  });
+
+  // Group by provider, pick cheapest
+  const byProvider = {};
+  offers.forEach(o => {
+    if (!byProvider[o.provider] || o.min_price < byProvider[o.provider].min_price) {
+      byProvider[o.provider] = o;
+    }
+  });
+
+  const sorted = Object.values(byProvider).sort((a, b) => a.min_price - b.min_price);
+
+  const canvas = document.getElementById('fsdl-chart');
+  const noData = document.getElementById('fsdl-no-data');
+
+  if (sorted.length === 0) {
+    canvas.style.display = 'none';
+    noData.style.display = 'block';
+    if (fsdlChart) { fsdlChart.destroy(); fsdlChart = null; }
+    document.getElementById('fsdl-tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1.5rem;">No data.</td></tr>';
     return;
   }
 
   canvas.style.display = 'block';
   noData.style.display = 'none';
 
-  const metricLabel = filters.metric === 'min_price' ? 'Min Price' : 'Avg Price';
-
-  if (chart) chart.destroy();
-
-  chart = new Chart(canvas, {
-    type: 'line',
-    data: { datasets },
+  if (fsdlChart) fsdlChart.destroy();
+  fsdlChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(o => o.provider),
+      datasets: [{
+        label: '$/hr per GPU',
+        data: sorted.map(o => o.min_price),
+        backgroundColor: sorted.map(o => (providerColors[o.provider] || '#888') + 'cc'),
+        borderColor: sorted.map(o => providerColors[o.provider] || '#888'),
+        borderWidth: 1,
+      }],
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: {
-        mode: 'nearest',
-        intersect: false,
-      },
+      indexAxis: 'y',
       plugins: {
-        legend: {
-          position: 'top',
-          labels: {
-            color: '#e0e0e8',
-            usePointStyle: true,
-            pointStyle: 'circle',
-            padding: 16,
-            font: { size: 12 },
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#232340ee', titleColor: '#e0e0e8', bodyColor: '#c0c0d0',
+          borderColor: '#3a3a5c', borderWidth: 1, padding: 10,
+          callbacks: {
+            label: (ctx) => {
+              const o = sorted[ctx.dataIndex];
+              return [
+                `$${o.min_price.toFixed(2)}/hr per GPU`,
+                `Instance: ${(o.instance_names || []).join(', ') || '\u2014'}`,
+                `GPU count: ${o.gpu_count}`,
+              ];
+            },
           },
         },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: '$/hr per GPU', color: '#9090a8' },
+          ticks: { color: '#9090a8', callback: v => '$' + v.toFixed(2) },
+          grid: { color: '#2a2a4a' },
+        },
+        y: {
+          ticks: { color: '#e0e0e8', font: { size: 12 } },
+          grid: { display: false },
+        },
+      },
+    },
+  });
+
+  // Table
+  document.getElementById('fsdl-tbody').innerHTML = sorted.map(o => {
+    const color = providerColors[o.provider] || '#888';
+    return `<tr>
+      <td><span class="color-dot" style="background:${color}"></span>${o.provider}</td>
+      <td>$${o.min_price.toFixed(2)}</td>
+      <td>${o.gpu_count}</td>
+      <td>${(o.instance_names || []).join(', ') || '\u2014'}</td>
+      <td>${o.spot ? 'Yes' : 'No'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Epoch hardware $/FLOP chart ───
+
+function renderEpoch() {
+  const items = data.epoch_hardware.items;
+  const tbody = document.getElementById('epoch-tbody');
+
+  // Chart: scatter plot of price-performance over time
+  const points = items
+    .filter(item => item.price_performance)
+    .map(item => ({
+      x: item.release_date,
+      y: item.price_performance,
+      name: item.name,
+      price: item.release_price_usd,
+      memory: item.memory_gb,
+    }));
+
+  // Color by era
+  const canvas = document.getElementById('epoch-chart');
+  if (epochChart) epochChart.destroy();
+
+  epochChart = new Chart(canvas, {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'FLOP/s per $',
+        data: points,
+        backgroundColor: points.map(p => {
+          const y = parseInt(p.x.slice(0, 4));
+          if (y >= 2023) return '#6c63ff';
+          if (y >= 2020) return '#4ecdc4';
+          if (y >= 2017) return '#ffd93d';
+          if (y >= 2014) return '#ff8a5c';
+          return '#ff6b6b';
+        }),
+        pointRadius: 6,
+        pointHoverRadius: 9,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
         tooltip: {
-          backgroundColor: '#232340ee',
-          titleColor: '#e0e0e8',
-          bodyColor: '#c0c0d0',
-          borderColor: '#3a3a5c',
-          borderWidth: 1,
-          padding: 10,
+          backgroundColor: '#232340ee', titleColor: '#e0e0e8', bodyColor: '#c0c0d0',
+          borderColor: '#3a3a5c', borderWidth: 1, padding: 10,
           callbacks: {
-            title: (items) => items[0]?.raw?.x || '',
+            title: (items) => items[0]?.raw?.name || '',
             label: (ctx) => {
-              const m = ctx.raw.meta;
-              if (!m) return `${ctx.dataset.label}: $${ctx.raw.y.toFixed(2)}/hr`;
+              const p = ctx.raw;
               const lines = [
-                `${ctx.dataset.label}: $${ctx.raw.y.toFixed(2)}/hr`,
-                `Instance: ${(m.instance_names || []).join(', ') || '—'}`,
-                `GPU count: ${m.gpu_count}`,
-                `Locations: ${(m.locations || []).slice(0, 4).join(', ')}${(m.locations || []).length > 4 ? '...' : ''}`,
+                `Released: ${p.x}`,
+                `Price: $${p.price.toLocaleString()}`,
+                `FLOP/s per $: ${p.y.toExponential(2)}`,
               ];
+              if (p.memory) lines.push(`Memory: ${p.memory} GB`);
               return lines;
             },
           },
@@ -551,84 +925,40 @@ function updateChart(providerColors) {
       scales: {
         x: {
           type: 'time',
-          time: {
-            unit: 'month',
-            tooltipFormat: 'yyyy-MM-dd',
-            displayFormats: { month: 'MMM yyyy' },
-          },
-          ticks: { color: '#9090a8', maxTicksLimit: 14 },
+          time: { unit: 'year', tooltipFormat: 'yyyy-MM-dd', displayFormats: { year: 'yyyy' } },
+          title: { display: true, text: 'Release Date', color: '#9090a8' },
+          ticks: { color: '#9090a8' },
           grid: { color: '#2a2a4a' },
         },
         y: {
-          title: {
-            display: true,
-            text: `${metricLabel} ($/hr)`,
-            color: '#9090a8',
-          },
+          type: 'logarithmic',
+          title: { display: true, text: 'FLOP/s per $ (log scale)', color: '#9090a8' },
           ticks: {
             color: '#9090a8',
-            callback: v => '$' + v.toFixed(2),
+            callback: v => {
+              const exp = Math.log10(v);
+              if (Number.isInteger(exp)) return '10^' + exp;
+              return '';
+            },
           },
           grid: { color: '#2a2a4a' },
-          beginAtZero: false,
         },
       },
     },
   });
 
-  // Force a reasonable height
-  canvas.parentElement.style.height = '420px';
-
-  updateSummaryTable(filters, providerColors);
-}
-
-function updateSummaryTable(filters, providerColors) {
-  const tbody = document.getElementById('summary-tbody');
-  if (!tbody) return;
-
-  // Find the latest snapshot with matching data
-  const rows = [];
-  for (let i = data.snapshots.length - 1; i >= 0; i--) {
-    const snapshot = data.snapshots[i];
-    const matched = filterOffers(snapshot.offers, filters);
-    if (matched.length === 0) continue;
-
-    // Group by provider, pick best price per provider
-    const byProvider = {};
-    matched.forEach(o => {
-      const price = o[filters.metric];
-      if (price == null) return;
-      const key = filters.spotMode === 'both'
-        ? `${o.provider}-${o.spot ? 'spot' : 'ondemand'}`
-        : o.provider;
-      if (!byProvider[key] || price < byProvider[key][filters.metric]) {
-        byProvider[key] = o;
-      }
-    });
-
-    Object.values(byProvider).forEach(o => {
-      rows.push({ ...o, date: snapshot.date });
-    });
-    break;
-  }
-
-  rows.sort((a, b) => a[filters.metric] - b[filters.metric]);
-
-  if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:1.5rem;">No data for current selection.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = rows.map(o => {
-    const color = providerColors[o.provider];
+  // Table
+  tbody.innerHTML = items.map(item => {
+    const pflops = item.max_flops ? (item.max_flops / 1e15).toFixed(2) : '\u2014';
+    const dolPerPflop = item.max_flops ? '$' + (item.release_price_usd / (item.max_flops / 1e15)).toFixed(0) : '\u2014';
     return `<tr>
-      <td><span class="color-dot" style="background:${color}"></span>${o.provider}</td>
-      <td>$${o[filters.metric].toFixed(2)}</td>
-      <td>${o.gpu_count}</td>
-      <td>${(o.instance_names || []).join(', ') || '—'}</td>
-      <td>${(o.locations || []).slice(0, 3).join(', ')}${(o.locations || []).length > 3 ? '...' : ''}</td>
-      <td>${o.spot ? 'Yes' : 'No'}</td>
-      <td>${o.date}</td>
+      <td>${item.name}</td>
+      <td>${item.release_date}</td>
+      <td>$${item.release_price_usd.toLocaleString()}</td>
+      <td>${pflops}</td>
+      <td>${dolPerPflop}</td>
+      <td>${item.tdp_watts || '\u2014'}</td>
+      <td>${item.memory_gb || '\u2014'}</td>
     </tr>`;
   }).join('');
 }
